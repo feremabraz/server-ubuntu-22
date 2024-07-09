@@ -1,0 +1,25 @@
+{
+  "name": "server-ubuntu-22",
+  "main": "main.mjs",
+  "scripts": {
+    "build": "node --experimental-sea-config sea-config.json && sha256sum ubuntu-hardening-tool > ubuntu-hardening-tool.sha256 && chmod +x ubuntu-hardening-tool",
+    "check": "biome check main.mjs",
+    "check:apply": "biome check --write main.mjs",
+    "format": "biome format --write main.mjs",
+    "prepare": "husky",
+    "release": "pnpm build && pnpm version",
+    "version": "conventional-changelog -p angular -i CHANGELOG.md -s && git add CHANGELOG.md"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "picocolors": "^1.0.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.8.3",
+    "@commitlint/cli": "^19.3.0",
+    "@commitlint/config-conventional": "^19.2.2",
+    "conventional-changelog-cli": "^5.0.0",
+    "husky": "^9.0.11"
+  }
+}
