@@ -28,11 +28,12 @@ This tool automates the process of hardening an Ubuntu 22.04 server based on bes
 ## Development - Prerequisites
 
 - Node.js v22.4.1 or later
-- Ubuntu 22.04 or later with root access
+- Ubuntu 22.04 or later
+- Docker (recommended, for testing)
 
-## Development - Executable
+## Development - Executable & Packaging
 
-This script is designed to be packaged as a single executable application using Node.js v22.4.1 'Single executable applications' feature.
+This script is designed to be packaged as a single executable application using Node.js v22.4.1 'Single Executable Applications' (SEA) feature. The packaging is configured in `sea-config.json`.
 
 ### Usage Modes
 
@@ -59,6 +60,8 @@ This script is designed to be packaged as a single executable application using 
 
 ### Rollback & Logging
 - If a command fails, the script logs which step failed and what had already been attempted. In dry-run mode, all planned actions are logged.
+
+### Build & Deploy
 
 1. Build the executable: `pnpm install && pnpm build`
 2. Make the file executable: `chmod +x ubuntu-hardening-tool`
@@ -89,18 +92,51 @@ This project uses [Changesets](https://github.com/changesets/changesets) for aut
    ```
    This pushes your commits and tags to the `main` branch on GitHub, triggering the GitHub Actions workflow that builds your executable and checksum and uploads them as release artifacts.
 
-**Automating GitHub Releases with Artifacts:**
-- You can further automate your workflow by using GitHub Actions (or similar CI/CD tools) to:
-  - Push your code, tags, and changelog to GitHub
-  - Automatically publish a new release on GitHub
-  - Attach the built executable and checksum as downloadable release artifacts
-- This means that after running `pnpm release` and pushing your changes, users can download pre-built binaries directly from your GitHub Releases page, improving usability and trust.
-- If you want to set up this automation, let me know!
-
-## Direct Usage
+## Direct Usage on a Server
 
 1. Get the script: `wget https://github.com/feremabraz/server-ubuntu-22/releases/download/vX.Y.Z/ubuntu-hardening-tool` (adjust accordingly)
 2. Get the checksum: `wget https://github.com/feremabraz/server-ubuntu-22/releases/download/vX.Y.Z/ubuntu-hardening-tool.sha256`
 3. Verify the script's integrity: `sha256sum --check ubuntu-hardening-tool.sha256`
 4. Make the file executable: `chmod +x ubuntu-hardening-tool`
 5. Run it: `./ubuntu-hardening-tool`
+
+## Testing with Docker
+
+You can safely test the hardening tool in a clean Ubuntu 22.04 environment using Docker:
+
+**1. Build the Docker image:**
+
+This command reads the Dockerfile and creates a new image called `ubuntu-hardening-test`:
+```sh
+docker build -t ubuntu-hardening-test .
+```
+
+**2. Run the container in different modes:**
+
+- **Interactive mode (prompts for username/SSH port):**
+  ```sh
+  docker run --rm -it --privileged ubuntu-hardening-test
+  ```
+  - `--rm` cleans up the container after it exits.
+  - `-it` makes the terminal interactive.
+  - `--privileged` gives the container extra permissions to change system settings (needed for real hardening steps).
+
+- **Non-interactive mode (automated, no prompts):**
+  ```sh
+  docker run --rm -it --privileged ubuntu-hardening-test ./ubuntu-hardening-tool --non-interactive --username=testuser --ssh-port=2222
+  ```
+  - This runs the tool with all required flags for automation.
+
+- **Dry-run mode (no changes made, just logs actions):**
+  ```sh
+  docker run --rm -it ubuntu-hardening-test ./ubuntu-hardening-tool --dry-run --non-interactive --username=testuser
+  ```
+  - You can omit `--privileged` here, since no system changes are made.
+
+**3. Inspect or debug the container:**
+
+To open a shell inside the container for manual inspection or to run commands yourself:
+```sh
+docker run --rm -it --privileged ubuntu-hardening-test bash
+```
+
