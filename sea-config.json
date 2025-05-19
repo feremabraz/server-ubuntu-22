@@ -1,5 +1,5 @@
 {
-  "main": "main.mjs",
-  "output": "ubuntu-hardening-tool",
-  "assets": ["node_modules/@clack/prompts/**/*", "node_modules/picocolors/**/*"]
+	"main": "main.mjs",
+	"output": "ubuntu-hardening-tool",
+	"assets": ["node_modules/@clack/prompts/**/*", "node_modules/picocolors/**/*"]
 }

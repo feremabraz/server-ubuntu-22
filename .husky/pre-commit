@@ -1,1 +1,4 @@
-pnpm check
+#!/bin/sh
+pnpm format
+pnpm lint
+pnpm test

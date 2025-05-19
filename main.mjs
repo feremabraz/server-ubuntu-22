@@ -5,26 +5,128 @@ import fs from "node:fs/promises";
 import util from "node:util";
 import { confirm, intro, outro, text } from "@clack/prompts";
 import color from "picocolors";
+import yargs from "yargs";
 
 const execAsync = util.promisify(exec);
 
-async function runCommand(command) {
-	const { stdout, stderr } = await execAsync(command);
-	console.log(stdout);
-	if (stderr) console.error(color.yellow(stderr));
+let DRY_RUN = false;
+let STEPS_LOG = [];
+
+export async function runCommand(command) {
+	if (DRY_RUN) {
+		console.log(color.magenta(`[DRY RUN] Would run: ${command}`));
+		STEPS_LOG.push({ type: "command", value: command });
+		return { stdout: "", stderr: "" };
+	}
+	try {
+		const { stdout, stderr } = await execAsync(command);
+		if (stdout) console.log(stdout);
+		if (stderr) console.error(color.yellow(stderr));
+		STEPS_LOG.push({ type: "command", value: command });
+		return { stdout, stderr };
+	} catch (err) {
+		console.error(color.red(`[ERROR] Command failed: ${command}`), err.message);
+		throw err;
+	}
 }
 
-async function editFile(filePath, searchValue, replaceValue) {
+export async function editFile(filePath, searchValue, replaceValue) {
+	if (DRY_RUN) {
+		console.log(
+			color.magenta(
+				`[DRY RUN] Would edit file: ${filePath}, replacing '${searchValue}' with '${replaceValue}'`,
+			),
+		);
+		STEPS_LOG.push({ type: "editFile", filePath, searchValue, replaceValue });
+		return;
+	}
 	let content = await fs.readFile(filePath, "utf8");
 	content = content.replace(searchValue, replaceValue);
 	await fs.writeFile(filePath, content, "utf8");
+	STEPS_LOG.push({ type: "editFile", filePath, searchValue, replaceValue });
 }
 
-async function appendToFile(filePath, content) {
+export async function ensureLineInFile(filePath, line) {
+	if (DRY_RUN) {
+		console.log(
+			color.magenta(
+				`[DRY RUN] Would ensure line in file: ${filePath}, line: '${line.trim()}'`,
+			),
+		);
+		STEPS_LOG.push({ type: "ensureLineInFile", filePath, line });
+		return;
+	}
+	let content = "";
+	try {
+		content = await fs.readFile(filePath, "utf8");
+	} catch {
+		/* file may not exist yet */
+	}
+	if (!content.includes(line)) {
+		await fs.appendFile(filePath, line, "utf8");
+		STEPS_LOG.push({ type: "ensureLineInFile", filePath, line });
+	}
+}
+
+export async function appendToFile(filePath, content) {
+	if (DRY_RUN) {
+		console.log(
+			color.magenta(
+				`[DRY RUN] Would append to file: ${filePath}, content: '${content.trim()}'`,
+			),
+		);
+		STEPS_LOG.push({ type: "appendToFile", filePath, content });
+		return;
+	}
 	await fs.appendFile(filePath, content, "utf8");
+	STEPS_LOG.push({ type: "appendToFile", filePath, content });
 }
 
-async function main() {
+export async function serviceExists(service) {
+	try {
+		await execAsync(`systemctl status ${service}`);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function getArgOrEnv(argv, key, envKey, fallback) {
+	return argv[key] ?? process.env[envKey] ?? fallback;
+}
+
+export function getStepsLog() {
+	return STEPS_LOG;
+}
+
+export async function main() {
+	const argv = yargs(process.argv.slice(2))
+		.option("non-interactive", {
+			type: "boolean",
+			default: false,
+			describe: "Run without prompts (for automation)",
+		})
+		.option("username", {
+			type: "string",
+			describe: "Username for the new admin user",
+		})
+		.option("ssh-port", { type: "number", describe: "SSH port to use" })
+		.option("dry-run", {
+			type: "boolean",
+			default: false,
+			describe: "Log all actions but do not execute them",
+		})
+		.help().argv;
+
+	DRY_RUN = argv["dry-run"] || process.env.DRY_RUN === "1";
+	STEPS_LOG = [];
+
+	intro(color.inverse(" Enhanced Ubuntu 22.04 Server Hardening Tool "));
+
+	function logStep(msg) {
+		console.log(color.cyan(`[STEP] ${msg}`));
+	}
+
 	intro(color.inverse(" Enhanced Ubuntu 22.04 Server Hardening Tool "));
 
 	// Initial Setup
@@ -41,11 +143,22 @@ async function main() {
 	);
 
 	// Create Non-Root User
-	const username = await text({
-		message: "Enter the new username:",
-		validate: (value) =>
-			value.length === 0 ? "Username is required" : undefined,
-	});
+	let username = getArgOrEnv(argv, "username", "USERNAME");
+	if (!username && !argv["non-interactive"]) {
+		username = await text({
+			message: "Enter the new username:",
+			validate: (value) =>
+				value.length === 0 ? "Username is required" : undefined,
+		});
+	}
+	if (!username) {
+		console.error(
+			color.red(
+				"[ERROR] Username must be provided via --username or USERNAME env in non-interactive mode.",
+			),
+		);
+		process.exit(1);
+	}
 	await runCommand(`sudo adduser ${username}`);
 	await runCommand(`sudo usermod -aG sudo ${username}`);
 
@@ -60,25 +173,38 @@ async function main() {
 		"PasswordAuthentication yes",
 		"PasswordAuthentication no",
 	);
-	await appendToFile("/etc/ssh/sshd_config", "PubkeyAuthentication yes\n");
-	const newSSHPort = await text({
-		message: "Enter new SSH port:",
-		validate: (value) =>
-			Number.isNaN(Number(value)) ? "Port must be a number" : undefined,
-	});
+	await ensureLineInFile("/etc/ssh/sshd_config", "PubkeyAuthentication yes\n");
+	let newSSHPort = getArgOrEnv(argv, "ssh-port", "SSH_PORT");
+	if (!newSSHPort && !argv["non-interactive"]) {
+		newSSHPort = await text({
+			message: "Enter new SSH port:",
+			validate: (value) =>
+				Number.isNaN(Number(value)) ? "Port must be a number" : undefined,
+		});
+	}
+	if (!newSSHPort) {
+		console.error(
+			color.red(
+				"[ERROR] SSH port must be provided via --ssh-port or SSH_PORT env in non-interactive mode.",
+			),
+		);
+		process.exit(1);
+	}
 	await editFile("/etc/ssh/sshd_config", "Port 22", `Port ${newSSHPort}`);
 	await runCommand("sudo systemctl restart sshd");
 
 	// Configure UFW with rate limiting
+	logStep("Configuring UFW with rate limiting");
 	await runCommand("sudo ufw default deny incoming");
 	await runCommand("sudo ufw default allow outgoing");
 	await runCommand(`sudo ufw limit ${newSSHPort}/tcp comment 'SSH port'`);
 	await runCommand("sudo ufw enable");
 
 	// Install and Configure Fail2Ban
+	logStep("Installing and configuring Fail2Ban");
 	await runCommand("sudo apt install fail2ban");
 	await runCommand("sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local");
-	await appendToFile(
+	await ensureLineInFile(
 		"/etc/fail2ban/jail.local",
 		`
 [sshd]
@@ -108,6 +234,7 @@ ignoreregex =
 	await runCommand("sudo systemctl restart fail2ban");
 
 	// Disable Unused Services
+	logStep("Disabling unused services");
 	const services = [
 		"bluetooth.service",
 		"cups.service",
@@ -115,18 +242,24 @@ ignoreregex =
 		"rpcbind.service",
 	];
 	for (const service of services) {
-		await runCommand(`sudo systemctl disable ${service}`);
-		await runCommand(`sudo systemctl stop ${service}`);
+		if (await serviceExists(service)) {
+			await runCommand(`sudo systemctl disable ${service}`);
+			await runCommand(`sudo systemctl stop ${service}`);
+		} else {
+			console.log(color.yellow(`[WARN] Service not found: ${service}`));
+		}
 	}
 
 	// Secure Shared Memory
-	await appendToFile(
+	logStep("Securing shared memory");
+	await ensureLineInFile(
 		"/etc/fstab",
 		"tmpfs /run/shm tmpfs defaults,noexec,nosuid 0 0\n",
 	);
 
 	// Configure System-Wide Security Settings
-	await appendToFile(
+	logStep("Configuring system-wide security settings");
+	await ensureLineInFile(
 		"/etc/sysctl.conf",
 		`
 net.ipv4.conf.all.accept_redirects = 0
